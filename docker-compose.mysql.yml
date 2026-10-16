@@ -1,0 +1,27 @@
+# Optional overlay; use a dedicated database/volume, never an existing game's DB.
+services:
+  profile-mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: echomind
+      MYSQL_USER: echomind
+      MYSQL_PASSWORD: ${ECHOMIND_MYSQL_PASSWORD:?Set a dedicated MySQL app password}
+      MYSQL_ROOT_PASSWORD: ${ECHOMIND_MYSQL_ROOT_PASSWORD:?Set a distinct MySQL root password}
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - profile-mysql-data:/var/lib/mysql
+    networks: [echomind-network]
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u "$$MYSQL_USER" -D "$$MYSQL_DATABASE" -e "SELECT 1" >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 15
+  echomind:
+    environment:
+      PROFILE_BACKEND: mysql
+      MYSQL_PROFILE_URL: ${MYSQL_PROFILE_URL:?Set mysql+pymysql URL using profile-mysql host}
+    depends_on:
+      profile-mysql: {condition: service_healthy}
+volumes:
+  profile-mysql-data:

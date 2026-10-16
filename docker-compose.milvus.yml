@@ -1,0 +1,63 @@
+# Additive overlay: keep the original Redis/Chroma volumes and rollback service.
+# Start ONLY etcd/minio/milvus first; do not start the app before migration checks.
+services:
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+    command: etcd --advertise-client-urls=http://milvus-etcd:2379 --listen-client-urls=http://0.0.0.0:2379 --data-dir=/etcd
+    volumes:
+      - milvus-etcd-data:/etcd
+    networks: [echomind-network]
+    healthcheck:
+      test: [CMD, etcdctl, endpoint, health]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  milvus-minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data
+    volumes:
+      - milvus-minio-data:/minio_data
+    networks: [echomind-network]
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:9000/minio/health/live]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  milvus:
+    image: milvusdb/milvus:v2.6.17
+    command: [milvus, run, standalone]
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+    volumes:
+      - milvus-data:/var/lib/milvus
+    ports:
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9092:9091"
+    networks: [echomind-network]
+    depends_on:
+      milvus-etcd: {condition: service_healthy}
+      milvus-minio: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:9091/healthz]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  echomind:
+    environment:
+      VECTOR_BACKEND: milvus
+      MILVUS_URI: http://milvus:19530
+      MILVUS_COLLECTION_PREFIX: ${MILVUS_COLLECTION_PREFIX:-echomind_v1}
+    depends_on:
+      milvus: {condition: service_healthy}
+volumes:
+  milvus-etcd-data:
+  milvus-minio-data:
+  milvus-data:
